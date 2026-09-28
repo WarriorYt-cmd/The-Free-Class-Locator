@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Campus Toolkit</title>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#14213d;--panel:#1d2d50;--line:#3a4d7a;--txt:#f1f5e9;--mute:#a9b6d3;--ok:#b8f35a}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.55 "IBM Plex Sans",system-ui,sans-serif;padding:40px 16px}
+main{max-width:1000px;margin:auto}h1,h2{font-family:Silkscreen,"Courier New",monospace}
+h1{font-size:clamp(28px,6vw,48px);margin:0 0 6px;line-height:1.1}.sub{color:var(--mute);margin:0 0 30px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:20px}
+a.card{display:block;background:var(--panel);border:3px solid var(--line);box-shadow:5px 5px 0 #0c1428;padding:20px;color:var(--txt);text-decoration:none}
+a.card:hover,a.card:focus-visible{border-color:var(--ok);outline:none}
+.card h2{font-size:17px;margin:0 0 8px;color:var(--ok)}.card p{margin:0;color:var(--mute);font-size:15px}
+.card b{display:block;margin-top:14px;font:700 12px Silkscreen,monospace}
+</style></head><body><main>
+<h1>Campus Toolkit</h1>
+<p class="sub">Find empty rooms, find somewhere quiet between lectures, and keep your attendance safe.</p>
+<div class="grid">
+<a class="card" href="floor-manager.html"><h2>Smart-Search Floor Manager</h2><p>Empty rooms floor by floor, plus an AI text bar: "I need a room on the ground floor for 2 hours".</p><b>OPEN &rarr;</b></a>
+<a class="card" href="locator.html"><h2>Free Class Locator</h2><p>Pick your section and get rooms that stay empty for your whole free gap.</p><b>OPEN &rarr;</b></a>
+<a class="card" href="attendance.html"><h2>Attendance Advisor</h2><p>Charts, an OD / medical leave simulator and a chatbot that does the percentage math.</p><b>OPEN &rarr;</b></a>
+</div></main></body></html>
