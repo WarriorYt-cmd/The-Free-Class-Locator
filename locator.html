@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Free Class Locator</title>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#14213d;--panel:#1d2d50;--line:#3a4d7a;--txt:#f1f5e9;--mute:#a9b6d3;--ok:#b8f35a;--warn:#ffb627;--bad:#ff5c5c;--ink:#14213d}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.55 "IBM Plex Sans",system-ui,sans-serif;padding:24px 16px 60px}
+main{max-width:1000px;margin:auto}
+h1,h2,button,.px{font-family:Silkscreen,"Courier New",monospace;font-weight:700}
+h1{font-size:clamp(26px,5vw,42px);margin:0 0 4px;line-height:1.1}
+h2{font-size:17px;margin:0 0 12px}
+.sub{color:var(--mute);margin:0 0 22px}
+.panel{background:var(--panel);border:3px solid var(--line);box-shadow:5px 5px 0 #0c1428;padding:18px;margin-bottom:22px}
+.ctrl{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+label{display:flex;flex-direction:column;font-size:13px;color:var(--mute);gap:3px}
+input,select{background:var(--bg);color:var(--txt);border:2px solid var(--line);padding:8px;font:inherit;min-width:110px}
+input:focus,select:focus,button:focus-visible{outline:3px solid var(--ok);outline-offset:1px}
+button{background:var(--ok);color:var(--ink);border:3px solid var(--ink);box-shadow:3px 3px 0 #0c1428;padding:10px 14px;cursor:pointer;font-size:13px}
+.status{border-left:6px solid var(--ok);padding:6px 14px;margin-bottom:16px}
+.status.none{border-color:var(--warn)}
+.status b{font:700 20px Silkscreen,monospace;display:block}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:10px}
+.room{border:3px solid var(--ok);padding:10px;background:var(--bg)}
+.room.part{border-color:var(--warn)}
+.room b{font:700 20px Silkscreen,monospace}
+.room small{display:block;color:var(--mute);font-size:13px;line-height:1.4}
+.st{font:700 11px Silkscreen,monospace;margin-top:5px;display:block;color:var(--ok)}
+.part .st{color:var(--warn)}
+.tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:7px}
+.tag{font:700 10px Silkscreen,monospace;background:var(--line);padding:2px 6px}
+.tag.g{background:var(--ok);color:var(--ink)}
+.who{display:grid;grid-template-columns:repeat(auto-fill,minmax(190px,1fr));gap:8px}
+.w{border:2px solid var(--line);padding:7px 9px;font-size:14px}
+.w b{font:700 13px Silkscreen,monospace}
+.w.me{border-color:var(--ok)}
+.w span{display:block;color:var(--mute);font-size:13px}
+.empty{color:var(--warn)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Free Class Locator</h1>
+  <p class="sub">Pick your section. We find your free gap and the rooms that stay empty for all of it, so nobody walks in and asks you to leave.</p>
+
+  <section class="panel" aria-label="Your details">
+    <div class="ctrl">
+      <label>Your section<select id="sec"></select></label>
+      <label>Day<select id="day"></select></label>
+      <label>Time<input id="time" type="time"></label>
+      <label>Group size<input id="grp" type="number" min="1" value="1"></label>
+      <label>Room type<select id="ac"><option value="">Any</option><option value="1">AC</option><option value="0">Non-AC</option></select></label>
+      <button type="button" id="now">Now</button>
+    </div>
+  </section>
+
+  <section class="panel" aria-live="polite">
+    <div id="status"></div>
+    <div id="rooms"></div>
+  </section>
+
+  <section class="panel">
+    <h2>Where is everyone right now?</h2>
+    <div class="who" id="who"></div>
+  </section>
+</main>
+
+<script src="data.js"></script>
+<script>
+const {rooms, slots, open, close} = window.DATA;
+const HASAC = rooms.some(r => r.ac !== null);   /* the timetables do not say which rooms are AC */
+const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"], $ = id => document.getElementById(id);
+const toMin = t => { const [h,m] = t.split(":").map(Number); return h*60+m; };
+const fmt = m => String(Math.floor(m/60)).padStart(2,"0")+":"+String(m%60).padStart(2,"0");
+const dur = m => (m>=60 ? Math.floor(m/60)+" h " : "") + (m%60 ? m%60+" min" : "");
+const floorName = f => f===0 ? "Ground floor" : ["First","Second","Third","Fourth","Fifth","Sixth","Seventh"][f-1]+" floor";
+const OPEN = toMin(open), CLOSE = toMin(close);
+const sections = [...new Set(slots.map(s => s.section))].sort();
+const roomById = Object.fromEntries(rooms.map(r => [r.id, r]));
+
+/* Is a room empty for the whole window [start,end)? If not, when does it get busy? */
+function freeUntil(room, day, start, end){
+  const mine = slots.filter(s => s.room===room.id && s.day===day);
+  const hit = mine.filter(s => toMin(s.start) < end && toMin(s.end) > start).map(s => toMin(s.start));
+  if (!hit.length) return {whole:true};
+  return {whole:false, until: Math.max(start, Math.min(...hit))};
+}
+/* The student's free gap: skip any class they are in now (and back-to-back ones), stop at next class */
+function gapFor(sec, day, t){
+  const mine = slots.filter(s => s.section===sec && s.day===day).sort((a,b) => toMin(a.start)-toMin(b.start));
+  let start = t, current = null, moved = true;
+  while (moved){ moved = false;                       /* breaks under 15 min (tea, changeover) do not count as free time */
+    for (const s of mine) if (toMin(s.start) <= start + 15 && toMin(s.end) > start){
+      if (toMin(s.start) <= t) current = current || s; start = toMin(s.end); moved = true; } }
+  const nextSlot = mine.filter(s => toMin(s.start) >= start)[0];
+  return {start, end: nextSlot ? toMin(nextSlot.start) : CLOSE, current, next: nextSlot};
+}
+function floorLoad(day, t){ /* share of rooms busy per floor: lower = quieter */
+  const L = {};
+  rooms.forEach(r => { const f = L[r.floor] = L[r.floor] || {b:0,n:0}; f.n++; if (!freeUntil(r, day, t, t+1).whole) f.b++; });
+  return Object.fromEntries(Object.entries(L).map(([k,v]) => [k, v.b/v.n]));
+}
+
+function render(){
+  const sec = $("sec").value, day = $("day").value, t = toMin($("time").value||"09:00"), grp = +$("grp").value||1, ac = $("ac").value;
+  const g = gapFor(sec, day, t), gap = g.end - g.start, st = $("status"), out = $("rooms");
+  const cur = g.current ? `You are in <b style="display:inline;font-size:inherit">${g.current.room||"class"}</b> until ${fmt(toMin(g.current.end))}. ` : "";
+  if (t < OPEN || t >= CLOSE){ st.className="status none"; st.innerHTML=`<b>Outside class hours</b>Classes run ${open} to ${close}.`; out.innerHTML=""; renderWho(day,t,sec); return; }
+  if (gap <= 0){ st.className="status none"; st.innerHTML=`<b>No free gap left today</b>${cur}You have no free time after this.`; out.innerHTML=""; renderWho(day,t,sec); return; }
+  st.className="status";
+  st.innerHTML = `<b>Free ${fmt(g.start)} to ${fmt(g.end)} (${dur(gap)})</b>${cur}${g.next ? `Next class: ${g.next.room ? g.next.room+", "+floorName(roomById[g.next.room].floor)+"," : "room not listed,"} at ${fmt(toMin(g.next.start))}.` : "No more classes today."}`;
+  const load = floorLoad(day, g.start), quietest = Object.entries(load).sort((a,b)=>a[1]-b[1])[0]?.[0];
+  const nextFloor = g.next && roomById[g.next.room] ? roomById[g.next.room].floor : null;
+  const list = rooms.filter(r => (!r.cap || r.cap >= grp) && (ac==="" || !HASAC || r.ac === (ac==="1")) && !r.lab && r.id !== (g.current && g.current.room))
+    .map(r => ({r, f: freeUntil(r, day, g.start, g.end)}))
+    .map(x => ({...x, cover: x.f.whole ? gap : x.f.until - g.start}))
+    .filter(x => x.cover >= 15)                       /* skip rooms that would evict you within 15 min */
+    .sort((a,b) => (b.f.whole - a.f.whole) || (load[a.r.floor]-load[b.r.floor]) || (b.cover-a.cover));
+  if (!list.length){ out.innerHTML = `<p class="empty">No room stays free long enough. Try a smaller group or Any room type.</p>`; renderWho(day,t,sec); return; }
+  out.innerHTML = `<div class="grid">${list.map(({r,f,cover}) => `<div class="room ${f.whole?"":"part"}"><b>${r.id}</b>
+    <small>${r.bld} · ${floorName(r.floor)}${r.ac===true?" · AC":""}${r.lab?" · Lab":""}</small>
+    <span class="st">${f.whole ? "FREE FOR YOUR WHOLE GAP" : "FREE ONLY UNTIL "+fmt(f.until)+" ("+dur(cover)+")"}</span>
+    <div class="tags">${f.whole?'<span class="tag g">Safe to stay</span>':""}${String(r.floor)===quietest?'<span class="tag">Quietest floor</span>':""}${r.floor===nextFloor?'<span class="tag">Same floor as next class</span>':""}</div></div>`).join("")}</div>`;
+  renderWho(day, t, sec);
+}
+function renderWho(day, t, me){
+  $("who").innerHTML = sections.map(s => {
+    const now = slots.find(x => x.section===s && x.day===day && toMin(x.start)<=t && toMin(x.end)>t);
+    const nxt = slots.filter(x => x.section===s && x.day===day && toMin(x.start)>t).sort((a,b)=>toMin(a.start)-toMin(b.start))[0];
+    return `<div class="w ${s===me?"me":""}"><b>${s}</b><span>${now ? "In "+(now.room ? now.room+" ("+floorName(roomById[now.room].floor)+")" : "class (room not listed)")+" till "+fmt(toMin(now.end)) : "Free right now"}</span><span>${nxt ? "Next: "+(nxt.room||"class")+" at "+fmt(toMin(nxt.start)) : "Done for the day"}</span></div>`;
+  }).join("");
+}
+
+$("sec").innerHTML = sections.map(s => `<option>${s}</option>`).join("");
+$("day").innerHTML = DAYS.slice(1,6).map(d => `<option>${d}</option>`).join("");
+function setNow(){ const n = new Date(); $("day").value = DAYS[n.getDay()%6||1]; $("time").value = fmt(n.getHours()*60+n.getMinutes()); render(); }
+["sec","day","time","grp","ac"].forEach(id => $(id).addEventListener("input", render));
+if (!HASAC) $("ac").parentElement.style.display = "none";
+if (!rooms.some(r => r.cap)) $("grp").parentElement.style.display = "none";
+$("now").onclick = setNow; setNow();
+</script>
+</body>
+</html>

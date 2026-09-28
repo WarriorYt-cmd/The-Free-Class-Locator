@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Smart-Search Floor Manager</title>
+<link href="https://fonts.googleapis.com/css2?family=Silkscreen:wght@400;700&family=IBM+Plex+Sans:wght@400;600&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#14213d;--panel:#1d2d50;--line:#3a4d7a;--txt:#f1f5e9;--mute:#a9b6d3;--ok:#b8f35a;--warn:#ffb627;--bad:#ff5c5c;--ink:#14213d}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--txt);font:16px/1.55 "IBM Plex Sans",system-ui,sans-serif;padding:24px 16px 60px}
+main{max-width:1000px;margin:auto}
+h1,h2,.px,button{font-family:Silkscreen,"Courier New",monospace;font-weight:700}
+h1{font-size:clamp(26px,5vw,42px);margin:0 0 4px;line-height:1.1}
+h2{font-size:17px;margin:0 0 12px}
+.sub{color:var(--mute);margin:0 0 22px}
+.panel{background:var(--panel);border:3px solid var(--line);box-shadow:5px 5px 0 #0c1428;padding:18px;margin-bottom:22px}
+.ai{border-color:var(--ok)}
+.bar,.ctrl{display:flex;gap:10px;flex-wrap:wrap;align-items:end}
+label{display:flex;flex-direction:column;font-size:13px;color:var(--mute);gap:3px}
+input,select{background:var(--bg);color:var(--txt);border:2px solid var(--line);padding:8px;font:inherit}
+#q{flex:1;min-width:220px;font-size:16px}
+input:focus,select:focus,button:focus-visible{outline:3px solid var(--ok);outline-offset:1px}
+button{background:var(--ok);color:var(--ink);border:3px solid var(--ink);box-shadow:3px 3px 0 #0c1428;padding:10px 14px;cursor:pointer;font-size:13px}
+button:active{transform:translate(2px,2px);box-shadow:1px 1px 0 #0c1428}
+button.chip{background:transparent;color:var(--txt);border-color:var(--line);box-shadow:none;font-size:10px;padding:5px 7px}
+.chips{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.tags{display:flex;gap:6px;flex-wrap:wrap;margin:12px 0 4px}
+.tag{font:700 11px Silkscreen,monospace;background:var(--line);padding:3px 7px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
+.room{border:3px solid var(--line);padding:9px;background:var(--bg)}
+.room.free{border-color:var(--ok)}.room.busy{border-color:var(--bad);opacity:.85}
+.room b{font:700 18px Silkscreen,monospace}
+.room small{display:block;color:var(--mute);font-size:12.5px;line-height:1.35}
+.st{font:700 11px Silkscreen,monospace;margin-top:4px;display:block}
+.free .st{color:var(--ok)}.busy .st{color:var(--bad)}
+.floor{margin-bottom:18px}.floor h3{font:700 14px Silkscreen,monospace;color:var(--warn);margin:0 0 8px}
+.res{margin-top:14px}.res .room{border-color:var(--ok)}
+.empty{color:var(--warn)}
+</style>
+</head>
+<body>
+<main>
+  <h1>Smart-Search Floor Manager</h1>
+  <p class="sub">Find empty rooms from the class timetables, by floor or just by asking.</p>
+
+  <section class="panel ai" aria-label="AI Room Finder">
+    <h2>AI Room Finder</h2>
+    <form class="bar" id="aiForm">
+      <input id="q" aria-label="Describe the room you need" placeholder="I need an AC room on the ground floor for me and my team for the next 2 hours">
+      <button>Find rooms</button>
+    </form>
+    <div class="chips" id="ex"></div>
+    <div id="ai" class="res" aria-live="polite"></div>
+  </section>
+
+  <section class="panel" aria-label="Floor grid">
+    <h2>Floor grid</h2>
+    <div class="ctrl">
+      <label>Day<select id="day"></select></label>
+      <label>Time<input id="time" type="time"></label>
+      <label>Type<select id="ac"><option value="">Any</option><option value="1">AC</option><option value="0">Non-AC</option></select></label>
+      <label>Show<select id="show"><option value="">All rooms</option><option value="free">Free only</option></select></label>
+      <label>Labs<select id="labs"><option value="">Hide labs</option><option value="1">Show labs</option></select></label>
+      <button type="button" id="now">Now</button>
+    </div>
+    <p class="sub" id="cap" style="margin:12px 0 14px"></p>
+    <div id="floors"></div>
+  </section>
+</main>
+
+<script src="data.js"></script>
+<script>
+const {rooms, slots, open, close} = window.DATA;
+const HASAC = rooms.some(r => r.ac !== null);   /* the timetables do not say which rooms are AC */
+const DAYS = ["Sun","Mon","Tue","Wed","Thu","Fri","Sat"];
+const $ = id => document.getElementById(id);
+const toMin = t => { const [h,m] = t.split(":").map(Number); return h*60 + m; };
+const fmt = m => String(Math.floor(m/60)).padStart(2,"0") + ":" + String(m%60).padStart(2,"0");
+const floorName = f => f === 0 ? "Ground floor" : ["First","Second","Third","Fourth","Fifth","Sixth","Seventh"][f-1] + " floor";
+const OPEN = toMin(open), CLOSE = toMin(close);
+
+/* ---- core logic: is a room free for the whole window [start, end) ? ---- */
+function check(room, day, start, end){
+  const busy = slots.filter(s => s.room === room.id && s.day === day && toMin(s.start) < end && toMin(s.end) > start)
+                    .sort((a,b) => toMin(a.start) - toMin(b.start));
+  if (busy.length) return {free:false, section: busy[0].section, until: Math.max(...busy.map(s => toMin(s.end)))};
+  const next = slots.filter(s => s.room === room.id && s.day === day && toMin(s.start) >= end).map(s => toMin(s.start));
+  return {free:true, until: next.length ? Math.min(...next) : CLOSE};
+}
+const card = (r, c, extra="") => `<div class="room ${c.free?"free":"busy"}"><b>${r.id}</b>
+  <small>${r.bld} · ${floorName(r.floor)}${r.ac===true?" · AC":""}${r.lab?" · Lab":""}</small>
+  <span class="st">${c.free ? "FREE until " + fmt(c.until) : "BUSY · " + c.section + " till " + fmt(c.until)}</span>${extra}</div>`;
+
+/* ---- floor grid ---- */
+function renderGrid(){
+  const day = $("day").value, t = toMin($("time").value || "09:00"), ac = $("ac").value, only = $("show").value === "free";
+  $("cap").textContent = `${day} at ${fmt(t)}` + (t < OPEN || t >= CLOSE ? " (outside class hours, everything is free)" : "");
+  const byFloor = {};
+  rooms.filter(r => (ac === "" || !HASAC || r.ac === (ac === "1")) && ($("labs").value || !r.lab)).forEach(r => {
+    const c = check(r, day, t, t + 1);
+    if (only && !c.free) return;
+    (byFloor[r.floor] = byFloor[r.floor] || []).push(card(r, c));
+  });
+  const keys = Object.keys(byFloor).sort((a,b) => a - b);
+  $("floors").innerHTML = keys.length ? keys.map(f => `<div class="floor"><h3>${floorName(+f)} · ${byFloor[f].length} room${byFloor[f].length>1?"s":""}</h3><div class="grid">${byFloor[f].join("")}</div></div>`).join("")
+                                       : `<p class="empty">No rooms match right now.</p>`;
+}
+
+/* ---- AI Room Finder: natural language -> filters -> exact rooms ---- */
+function parse(q){
+  const t = q.toLowerCase(), now = new Date(), p = {tags:[], labs:/\blab|workshop/.test(q.toLowerCase())};
+  p.ac = /\bnon[- ]?ac\b|without ac|no ac/.test(t) ? false : /\bac\b|a\/c|air.?condition/.test(t) ? true : null;
+  const fl = t.match(/ground/) ? 0 : (t.match(/(\d)\s*(?:st|nd|rd|th)?\s*floor/)||[])[1] ?? ({first:1,second:2,third:3,fourth:4}[(t.match(/(first|second|third|fourth)\s+floor/)||[])[1]]);
+  p.floor = fl === undefined ? null : +fl;
+  let dur = 60;
+  const h = t.match(/(\d+(?:\.\d+)?)\s*(?:hours?|hrs?|h)\b/), m = t.match(/(\d+)\s*(?:minutes?|mins?)\b/);
+  if (h) dur = Math.round(parseFloat(h[1]) * 60); else if (m) dur = +m[1]; else if (/half an hour/.test(t)) dur = 30; else if (/an hour|one hour/.test(t)) dur = 60;
+  p.dur = dur;
+  const cap = t.match(/(\d+)\s*(?:people|persons|students|members|seats|of us)/); p.cap = cap ? +cap[1] : null;
+  let day = DAYS[now.getDay()%6||1];
+  if (/tomorrow/.test(t)) day = DAYS[((now.getDay()+1)%7)%6||1];
+  DAYS.forEach(d => { if (new RegExp("\\b"+d.toLowerCase()+"(?:day|sday|nesday|rsday|urday)?\\b").test(t)) day = d; });
+  p.day = day;
+  let start = now.getHours()*60 + now.getMinutes();
+  const at = t.match(/(?:at|from|after)\s*(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/);
+  if (at){ let hh = +at[1]; if (at[3]==="pm" && hh<12) hh+=12; if (at[3]==="am" && hh===12) hh=0; if(!at[3] && hh<8) hh+=12; start = hh*60 + (+at[2]||0); }
+  p.start = start;
+  return p;
+}
+function runAI(q){
+  const p = parse(q), end = p.start + p.dur, out = $("ai");
+  const tags = [p.day, fmt(p.start) + " to " + fmt(end), (p.dur/60).toFixed(p.dur%60?1:0) + " h", p.ac===null?"any AC":p.ac?"AC":"Non-AC", p.floor===null?"any floor":floorName(p.floor)];
+  if (p.cap) tags.push(p.cap + "+ seats");
+  const head = (p.ac!==null && !HASAC ? '<p class="empty">The timetables do not say which rooms are AC, so the AC request was ignored.</p>' : "") + `<div class="tags">${tags.map(x=>`<span class="tag">${x}</span>`).join("")}</div>`;
+  if (p.start < OPEN || end > CLOSE) { out.innerHTML = head + `<p class="empty">That window is outside class hours (${open} to ${close}). Rooms are normally free then, but check with the office.</p>`; return; }
+  const hits = rooms.filter(r => (p.ac===null || !HASAC || r.ac===p.ac) && (p.floor===null || r.floor===p.floor) && (!p.cap || !r.cap || r.cap>=p.cap) && (p.labs || !r.lab))
+    .map(r => ({r, c: check(r, p.day, p.start, end)})).filter(x => x.c.free).sort((a,b) => b.c.until - a.c.until);
+  out.innerHTML = head + (hits.length
+    ? `<p><b>${hits.length} room${hits.length>1?"s":""}</b> free for the whole window (longest availability first):</p><div class="grid">${hits.map(x=>card(x.r,x.c)).join("")}</div>`
+    : `<p class="empty">No room matches all of that. Try dropping the AC or floor filter, or a shorter duration.</p>`);
+}
+
+/* ---- wiring ---- */
+$("day").innerHTML = DAYS.slice(1,6).map(d => `<option>${d}</option>`).join("");
+function setNow(){ const n = new Date(); $("day").value = DAYS[n.getDay()%6||1]; $("time").value = fmt(n.getHours()*60 + n.getMinutes()); renderGrid(); }
+["day","time","ac","show","labs"].forEach(id => $(id).addEventListener("input", renderGrid));
+$("now").onclick = setNow;
+$("aiForm").onsubmit = e => { e.preventDefault(); if ($("q").value.trim()) runAI($("q").value); };
+["I need an AC room on the ground floor for me and my team for the next 2 hours","Non-AC room on 2nd floor tomorrow at 2pm for 90 minutes","AC room for 30 students at 11am on Friday for 1 hour"].forEach(x => {
+  const b = document.createElement("button"); b.type="button"; b.className="chip"; b.textContent = x.length>46 ? x.slice(0,43)+"..." : x; b.title = x;
+  b.onclick = () => { $("q").value = x; runAI(x); }; $("ex").appendChild(b);
+});
+if (!HASAC) $("ac").parentElement.style.display = "none";
+setNow();
+</script>
+</body>
+</html>
